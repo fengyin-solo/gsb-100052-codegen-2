@@ -85,3 +85,6 @@ desktop.ini
 *.db
 *.pid
 *.seed
+
+# 分批入账闸门的暂存文件（预检未过 / 解析中断的批次）
+backend/var/

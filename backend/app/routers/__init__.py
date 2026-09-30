@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from app.routers import borehole as router_borehole
+from app.routers import borehole_import as router_borehole_import
 from app.routers import core as router_core
 from app.routers import stratigraphy as router_stratigraphy
 from app.routers import geophysics as router_geophysics
@@ -25,4 +26,6 @@ from app.routers import remote as router_remote
 from app.routers import mineral as router_mineral
 from app.routers import environmental as router_environmental
 
-ROUTERS = [router_borehole, router_core, router_stratigraphy, router_geophysics, router_geochem, router_assay, router_mapping, router_survey_point, router_drilling_log, router_reserve, router_sample_registry, router_equipment, router_hydro, router_section, router_geological_report, router_remote, router_mineral, router_environmental]
+# borehole_import 必须排在 borehole 之前：/imports、/todos 等子路径先注册，
+# 否则会被 borehole 的 /{entry_id} 数字路由误匹配。
+ROUTERS = [router_borehole_import, router_borehole, router_core, router_stratigraphy, router_geophysics, router_geochem, router_assay, router_mapping, router_survey_point, router_drilling_log, router_reserve, router_sample_registry, router_equipment, router_hydro, router_section, router_geological_report, router_remote, router_mineral, router_environmental]

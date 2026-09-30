@@ -5,14 +5,25 @@
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.routers import ROUTERS
+from app.services.borehole import BoreholeService
 from app.store import store
 
-app = FastAPI(title="地质勘探数据管理平台", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # 启动时把早期孔号作为历史别名补进钻孔台账；幂等，可重复启动
+    BoreholeService().migrate_legacy_aliases()
+    yield
+
+
+app = FastAPI(title="地质勘探数据管理平台", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

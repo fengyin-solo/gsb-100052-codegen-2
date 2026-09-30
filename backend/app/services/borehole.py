@@ -1,8 +1,9 @@
-"""钻孔编录业务规则：状态流转、字段校验与筛选口径都收在这里。"""
+"""钻孔编录业务规则：状态流转、字段校验、孔号身份索引与历史别名迁移。"""
 from __future__ import annotations
 
 from typing import Any
 
+from app.seed import LEGACY_BOREHOLE_ALIASES
 from app.store import store
 
 MODULE = "borehole"
@@ -38,8 +39,12 @@ class BoreholeService:
         if missing:
             return None, missing
         rows = store.rows(MODULE)
-        entry = {"id": max((int(row.get("id", 0)) for row in rows), default=0) + 1}
+        entry = {"id": store.next_id(MODULE)}
         entry.update({field: values.get(field) for field in REQUIRED_FIELDS})
+        for field in ("设计孔深", "终孔深度", "开孔日期", "终孔日期", "钻孔状态"):
+            if str(values.get(field) or "").strip():
+                entry[field] = values.get(field)
+        entry["历史别名"] = []
         entry["status"] = STATUS_ORDER[0]
         entry["pending"] = True
         entry["abnormal"] = False
@@ -59,3 +64,38 @@ class BoreholeService:
         entry["pending"] = target != STATUS_ORDER[-1]
         entry["abnormal"] = action in NEGATIVE_ACTIONS
         return entry, f"钻孔已{action}"
+
+    # ------------------------------------------------------------------
+    # 孔号身份索引：现行孔号 + 历史别名都指向同一条存量记录
+    # ------------------------------------------------------------------
+    def _identity_index(self) -> dict[str, dict[str, Any]]:
+        index: dict[str, dict[str, Any]] = {}
+        for row in store.rows(MODULE):
+            code = str(row.get("钻孔编号", "")).strip()
+            if code:
+                index[code] = row
+            for alias in row.get("历史别名", []) or []:
+                alias = str(alias).strip()
+                if alias:
+                    index[alias] = row
+        return index
+
+    def migrate_legacy_aliases(self) -> dict[str, int]:
+        """把早期孔号作为历史别名补到存量记录上；幂等，重复执行不产生重复别名。
+
+        返回补齐的记录数与别名条数，供启动与导入闸门调用。
+        """
+        migrated_rows = 0
+        migrated_aliases = 0
+        for row in store.rows(MODULE):
+            code = str(row.get("钻孔编号", "")).strip()
+            aliases = row.setdefault("历史别名", [])
+            touched = False
+            for legacy in LEGACY_BOREHOLE_ALIASES.get(code, []):
+                if legacy not in aliases:
+                    aliases.append(legacy)
+                    migrated_aliases += 1
+                    touched = True
+            if touched:
+                migrated_rows += 1
+        return {"rows": migrated_rows, "aliases": migrated_aliases}
