@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
+
+# 钻孔清单预检失败 / 解析中断时，整批退回的暂存目录（项目根 backend/var/staging）。
+_STAGING_DIR = Path(__file__).resolve().parent.parent / "var" / "staging"
 
 
 @dataclass(frozen=True)
@@ -17,6 +21,8 @@ class Settings:
     )
     page_size_default: int = 20
     page_size_max: int = 200
+    # 分批入账闸门的暂存文件目录：冲突退档、解析中断的原件都落到这里。
+    staging_dir: str = str(_STAGING_DIR)
 
 
 settings = Settings()

@@ -1,20 +1,104 @@
-"""钻孔编录接口：维护钻孔，覆盖开始钻进、登记终孔、执行封孔等动作。"""
+"""钻孔编录接口：维护钻孔，覆盖开始钻进、登记终孔、执行封孔等动作。
+
+分批入账闸门也挂在这里：
+- POST /api/borehole/imports            上传清单：预检通过才整批落库，否则整批退暂存
+- GET  /api/borehole/imports            导入批次台账（按指纹可查）
+- GET  /api/borehole/imports/{id}       单批次明细
+- GET  /api/borehole/imports/{id}/staging-file  下载暂存原件
+- GET  /api/borehole/todos              编录待办清单
+- POST /api/borehole/alias-migrations   早期孔号历史别名迁移
+"""
 from __future__ import annotations
 
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse
 
-from app.schemas import ActionResult, EntryPayload, PageResult
+from app.schemas import (
+    ActionResult,
+    AliasMigrationPayload,
+    EntryPayload,
+    ImportUploadPayload,
+    PageResult,
+)
 from app.services.borehole import BoreholeService
+from app.services.borehole_import import BoreholeImportService
 
 router = APIRouter(prefix="/api/borehole", tags=["钻孔编录"])
 
 service = BoreholeService()
+import_service = BoreholeImportService()
 
 LIST_FIELDS = ["钻孔编号", "勘探区", "孔口坐标", "设计孔深", "终孔深度", "开孔日期", "终孔日期", "钻孔状态"]
 STATUSES = ["待施工", "钻进中", "已终孔", "已封孔", "已废弃"]
 
+
+# ===================== 分批入账闸门 =====================
+
+@router.post("/imports")
+def submit_import(payload: ImportUploadPayload) -> dict[str, Any]:
+    """上传钻孔清单：先按勘探区与孔口坐标做冲突预检，全部通过才整批落库。
+
+    - 任一孔号命中存量（含历史别名）或坐标重合：整批退回暂存文件，不写入任何台账行；
+    - 同一文件指纹已处理：按幂等回放原结果，不生成第二份台账；
+    - 解析中断：返回失败行与暂存批次，携带 resume_batch_id 重新上传即从失败行续传。
+    """
+    if not payload.content.strip():
+        raise HTTPException(status_code=400, detail="上传内容为空，请提供钻孔清单 CSV 原文")
+    try:
+        if payload.resume_batch_id is not None:
+            return import_service.resume(payload.resume_batch_id, payload.content)
+        return import_service.submit(payload.content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/imports")
+def list_imports(
+    fingerprint: str | None = Query(default=None, description="按文件指纹精确查询"),
+) -> dict[str, Any]:
+    """导入批次台账：每次上传都登记一条，可按指纹核对幂等情况。"""
+    batches = import_service.list_batches(digest=fingerprint)
+    return {"total": len(batches), "items": batches}
+
+
+@router.get("/imports/{batch_id}")
+def get_import(batch_id: int) -> dict[str, Any]:
+    batch = import_service.get_batch(batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail=f"导入批次 {batch_id} 不存在")
+    return batch
+
+
+@router.get("/imports/{batch_id}/staging-file")
+def download_staging_file(batch_id: int) -> FileResponse:
+    """下载预检退档 / 解析中断批次的暂存原件，供现场核对后重新上传。"""
+    path = import_service.staging_file(batch_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail=f"批次 {batch_id} 没有可取回的暂存文件")
+    return FileResponse(path, media_type="text/csv", filename=path.split("/")[-1])
+
+
+@router.get("/todos")
+def list_todos(pending_only: bool = Query(default=True)) -> dict[str, Any]:
+    """编录待办清单：整批入账后按新孔逐条回写。"""
+    items = import_service.list_todos(pending_only=pending_only)
+    return {"total": len(items), "items": items}
+
+
+@router.post("/alias-migrations", response_model=ActionResult)
+def migrate_aliases(payload: AliasMigrationPayload) -> ActionResult:
+    """早期孔号迁移：补齐历史别名；坐标冲突时以现场确认坐标覆盖为准。"""
+    items = [item.model_dump() for item in payload.items]
+    try:
+        result = import_service.migrate_aliases(items)
+    except ValueError as exc:
+        return ActionResult(ok=False, message=str(exc))
+    return ActionResult(ok=result["ok"], message=result["message"], entry=result)
+
+
+# ===================== 钻孔编录台账 =====================
 
 @router.get("", response_model=PageResult[dict])
 def list_entries(

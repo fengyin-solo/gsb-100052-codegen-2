@@ -28,6 +28,26 @@ class EntryPayload(BaseModel):
     remark: str | None = None
 
 
+class ImportUploadPayload(BaseModel):
+    """钻孔清单上传：原文用 CSV（首行表头），续传时带上解析中断的父批次。"""
+
+    content: str = Field(description="清单文件原文（CSV，首行需含 钻孔编号/勘探区/孔口坐标）")
+    filename: str | None = Field(default=None, description="原始文件名，仅用于展示")
+    resume_batch_id: int | None = Field(default=None, description="解析中断后续传时，传入上一批次 id")
+
+
+class AliasMigrationItem(BaseModel):
+    """早期孔号迁移：补历史别名，坐标冲突时以现场确认坐标为准。"""
+
+    钻孔编号: str
+    历史别名: list[str] = Field(default_factory=list)
+    现场确认坐标: str | None = None
+
+
+class AliasMigrationPayload(BaseModel):
+    items: list[AliasMigrationItem]
+
+
 
 class BoreholeEntry(BaseModel):
     """钻孔明细结构。"""

@@ -85,3 +85,6 @@ desktop.ini
 *.db
 *.pid
 *.seed
+
+# 分批入账闸门：冲突退档 / 解析中断的暂存原件
+backend/var/
